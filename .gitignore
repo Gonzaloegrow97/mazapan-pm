@@ -1,0 +1,9 @@
+# Archivos fuente crudos del negocio (Excel del ERP). Sensibles y no necesarios para correr la app.
+# Si querés que el colaborador tenga los Excel de origen, borrá la línea siguiente.
+datos/
+
+# Temporales / sistema
+.DS_Store
+*.tmp
+_*.txt
+_*.json

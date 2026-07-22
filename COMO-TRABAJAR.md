@@ -1,6 +1,6 @@
 # Cómo trabajar con este repositorio
 
-Guía simple para colaborar en la app de Mazapán sin pisarse. Pensada para Pablo (y cualquier
+Guía simple para colaborar en la app de Masapan sin pisarse. Pensada para Pablo (y cualquier
 colaborador).
 
 ---

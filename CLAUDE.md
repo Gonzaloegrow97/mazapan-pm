@@ -1,9 +1,9 @@
-# Mazapán · Gestión de Proyectos — Guía para Claude Code
+# Masapan · Gestión de Proyectos — Guía para Claude Code
 
 Contexto del proyecto para que Claude Code trabaje bien en este repo desde el primer momento.
 
 ## Qué es
-Aplicación de gestión y control de gestión para **Mazapán** (panadería), para el Gerente
+Aplicación de gestión y control de gestión para **Masapan** (panadería), para el Gerente
 General. Es una **app de un solo archivo**: `mazapan-pm.html`.
 
 - Vanilla JS + CSS **inline**, sin build, sin dependencias externas.

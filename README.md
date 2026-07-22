@@ -1,6 +1,6 @@
-# Mazapán · Gestión de Proyectos
+# Masapan · Gestión de Proyectos
 
-Aplicación de gestión y control de gestión para **Mazapán** (panadería), pensada para el
+Aplicación de gestión y control de gestión para **Masapan** (panadería), pensada para el
 Gerente General. Es una **app de un solo archivo** (`mazapan-pm.html`) que funciona en el
 navegador, sin instalación ni servidor.
 

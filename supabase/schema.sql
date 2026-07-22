@@ -98,3 +98,14 @@ alter publication supabase_realtime add table tareas;
 alter publication supabase_realtime add table kpis;
 alter publication supabase_realtime add table reportes;
 alter publication supabase_realtime add table ventas;
+
+-- ---------- Datos analíticos protegidos (P&L, clientes, producción) ----------
+-- Se mueven acá desde el HTML para poder publicar la app sin exponer los financieros.
+create table if not exists datos (
+  clave text primary key,
+  payload jsonb,
+  updated_at timestamptz default now()
+);
+alter table datos enable row level security;
+create policy "auth full datos" on datos for all to authenticated using (true) with check (true);
+alter publication supabase_realtime add table datos;

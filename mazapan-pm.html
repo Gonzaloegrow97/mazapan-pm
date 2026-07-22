@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Masapan · Gestión de Proyectos</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <style>
   :root{
     --bg:#f4f5f7; --panel:#ffffff; --ink:#1f2430; --muted:#6b7280; --line:#e5e7eb;
@@ -314,6 +315,23 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
 <input type="file" id="importCsv" accept=".csv,text/csv" style="display:none">
 <input type="file" id="importXlsx" accept=".xlsx" style="display:none">
 
+<!-- Login (nube) -->
+<div class="overlay" id="loginOverlay" style="align-items:center;background:rgba(17,24,39,.7)">
+  <div class="modal" style="max-width:400px">
+    <div class="body" style="text-align:center;padding:30px 26px">
+      <div style="width:52px;height:52px;border-radius:13px;background:var(--brand);display:inline-grid;place-items:center;font-size:26px;margin-bottom:12px">🥐</div>
+      <h3 style="margin:0 0 4px">Masapan · Gestión</h3>
+      <div class="m" id="lg_sub" style="margin-bottom:18px">Ingresá con tu cuenta para ver los datos compartidos</div>
+      <div class="field" style="text-align:left"><label>Email</label><input id="lg_email" type="email" placeholder="tu@email.com" autocomplete="username"></div>
+      <div class="field" style="text-align:left"><label>Contraseña</label><input id="lg_pass" type="password" placeholder="••••••••" autocomplete="current-password"></div>
+      <div id="lg_msg" style="font-size:12px;color:var(--bad);min-height:16px;margin:6px 0 12px;text-align:left"></div>
+      <button class="btn primary" id="loginBtn" style="width:100%;justify-content:center;margin-bottom:8px">Entrar</button>
+      <button class="btn" id="signupBtn" style="width:100%;justify-content:center">Crear cuenta</button>
+      <div class="m" style="margin-top:14px;font-size:11px">También podés usar la app <a href="#" id="lg_offline" style="color:var(--brand)">sin conexión</a> (datos solo en este equipo).</div>
+    </div>
+  </div>
+</div>
+
 <script>
 "use strict";
 const STORAGE_KEY = "mazapan_pm_v1";
@@ -341,7 +359,8 @@ const DIAS=["Dom","Lun","Mar","Mié","Jue","Vie","Sáb"];
 function fmtDate(s){ const d=parseD(s); if(!d) return "—"; return `${pad(d.getDate())} ${MESES[d.getMonth()].slice(0,3)}`; }
 function fmtRel(s){ const n=daysUntil(s); if(n===null) return ""; if(n<0) return `hace ${Math.abs(n)}d`; if(n===0) return "hoy"; if(n===1) return "mañana"; return `en ${n}d`; }
 const isOverdue = t => t.fechaVencimiento && t.estado!=="completada" && daysUntil(t.fechaVencimiento)<0;
-const uid = p => p+Math.random().toString(36).slice(2,8);
+const uid = p => (typeof crypto!=="undefined"&&crypto.randomUUID) ? crypto.randomUUID()
+  : "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g,c=>{const r=Math.random()*16|0;return (c==="x"?r:(r&0x3|0x8)).toString(16);});
 const initials = n => (n||"?").split(" ").filter(Boolean).slice(0,2).map(w=>w[0]).join("").toUpperCase();
 
 /* ---------- seed data ---------- */
@@ -400,7 +419,7 @@ function load(){
   try{ const raw=localStorage.getItem(STORAGE_KEY); if(raw) return JSON.parse(raw); }catch(e){}
   const s=seed(); localStorage.setItem(STORAGE_KEY,JSON.stringify(s)); return s;
 }
-function save(){ localStorage.setItem(STORAGE_KEY,JSON.stringify(DB)); }
+function save(){ localStorage.setItem(STORAGE_KEY,JSON.stringify(DB)); if(typeof cloudSync==="function") cloudSync(); }
 const area = id => DB.areas.find(a=>a.id===id) || {nombre:"—",color:"#999",subareas:[]};
 
 /* ---------- app state ---------- */
@@ -1321,8 +1340,132 @@ function syncNav(){
   updateHeader();
 }
 
+/* ===================== NUBE (Supabase) ===================== */
+const CLOUD = {
+  url:"https://bgaeawraqqnjxoozreqf.supabase.co",
+  key:"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJnYWVhd3JhcXFuanhvb3pyZXFmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ3MTk0MzQsImV4cCI6MjEwMDI5NTQzNH0.gnVbwhRamlUpMn2wEtEYsMvhL3xZ4h9tsRrvoevCFY4",
+  sb:null, on:false, user:null,
+  lastIds:{tareas:new Set(),kpis:new Set(),reportes:new Set(),areas:new Set()},
+  syncTimer:null, rtTimer:null, muteUntil:0
+};
+const VENTAS_ID="00000000-0000-0000-0000-000000000001";
+const cnum = v => { const n=+v; return isFinite(n)?n:0; };
+/* mappers app<->db */
+const tOut=t=>({id:t.id,titulo:t.titulo,descripcion:t.descripcion||null,area:t.area||null,subarea:t.subarea||null,responsable:t.responsable||null,entregable:t.entregable||null,prioridad:t.prioridad||"media",estado:t.estado||"pendiente",fecha_inicio:t.fechaInicio||null,fecha_vencimiento:t.fechaVencimiento||null,kpi_id:t.kpiId||null,notas:t.notas||null,created_at:t.createdAt||null});
+const tIn=r=>({id:r.id,titulo:r.titulo,descripcion:r.descripcion||"",area:r.area,subarea:r.subarea||"",responsable:r.responsable||"",entregable:r.entregable||"",prioridad:r.prioridad||"media",estado:r.estado||"pendiente",fechaInicio:r.fecha_inicio||"",fechaVencimiento:r.fecha_vencimiento||"",kpiId:r.kpi_id||null,notas:r.notas||"",createdAt:r.created_at||""});
+const kOut=k=>({id:k.id,nombre:k.nombre,area:k.area||null,meta:cnum(k.meta),valor_actual:cnum(k.valorActual),unidad:k.unidad||null,periodo:k.periodo||null,direccion:k.direccion||"mayor",tendencia:k.tendencia||"flat"});
+const kIn=r=>({id:r.id,nombre:r.nombre,area:r.area,meta:cnum(r.meta),valorActual:cnum(r.valor_actual),unidad:r.unidad||"",periodo:r.periodo||"",direccion:r.direccion||"mayor",tendencia:r.tendencia||"flat"});
+const rOut=x=>({id:x.id,nombre:x.nombre,area:x.area||null,responsable:x.responsable||null,frecuencia:x.frecuencia||"semanal",proxima_entrega:x.proximaEntrega||null,ultima_entrega:x.ultimaEntrega||null,estado:x.estado||"pendiente"});
+const rIn=x=>({id:x.id,nombre:x.nombre,area:x.area,responsable:x.responsable||"",frecuencia:x.frecuencia||"semanal",proximaEntrega:x.proxima_entrega||"",ultimaEntrega:x.ultima_entrega||"",estado:x.estado||"pendiente"});
+const aOut=a=>({id:a.id,nombre:a.nombre,color:a.color,responsable:a.responsable||null,subareas:a.subareas||[]});
+const aIn=r=>({id:r.id,nombre:r.nombre,color:r.color,responsable:r.responsable||"",subareas:r.subareas||[]});
+const veOut=v=>({id:VENTAS_ID,periodo_label:v.periodoLabel||null,total_venta:cnum(v.totalVenta),neto:cnum(v.neto),costo:cnum(v.costo),ganancia:cnum(v.ganancia),margen_pct:cnum(v.margenPct),unidades:cnum(v.unidades),por_categoria:v.porCategoria||[],top_productos:v.topProductos||[],fuente:v.fuente||"OpenTPV (Excel)",importado_por:CLOUD.user?CLOUD.user.email:null,importado_el:new Date().toISOString()});
+const veIn=r=>r?({totalVenta:cnum(r.total_venta),neto:cnum(r.neto),costo:cnum(r.costo),ganancia:cnum(r.ganancia),margenPct:cnum(r.margen_pct),unidades:cnum(r.unidades),porCategoria:r.por_categoria||[],topProductos:r.top_productos||[],periodoLabel:r.periodo_label||"",importadoEl:(r.importado_el||"").slice(0,10),fuente:r.fuente||"OpenTPV (Excel)"}):null;
+
+async function cloudSeed(){
+  const s=seed();
+  await CLOUD.sb.from("areas").upsert(s.areas.map(aOut));
+  await CLOUD.sb.from("kpis").upsert(s.kpis.map(kOut));
+  await CLOUD.sb.from("tareas").upsert(s.tareas.map(tOut));
+  await CLOUD.sb.from("reportes").upsert(s.reportes.map(rOut));
+}
+async function cloudLoad(){
+  const sb=CLOUD.sb;
+  const [ar,ta,kp,re,ve]=await Promise.all([
+    sb.from("areas").select("*"), sb.from("tareas").select("*"),
+    sb.from("kpis").select("*"), sb.from("reportes").select("*"),
+    sb.from("ventas").select("*").eq("id",VENTAS_ID).maybeSingle()
+  ]);
+  if(ar.error) throw ar.error;
+  if((!ar.data||!ar.data.length) && (!ta.data||!ta.data.length)){ await cloudSeed(); return cloudLoad(); }
+  DB.areas=(ar.data||[]).map(aIn);
+  DB.tareas=(ta.data||[]).map(tIn);
+  DB.kpis=(kp.data||[]).map(kIn);
+  DB.reportes=(re.data||[]).map(rIn);
+  DB.ventas=veIn(ve.data);
+  CLOUD.lastIds.areas=new Set(DB.areas.map(a=>a.id));
+  CLOUD.lastIds.tareas=new Set(DB.tareas.map(t=>t.id));
+  CLOUD.lastIds.kpis=new Set(DB.kpis.map(k=>k.id));
+  CLOUD.lastIds.reportes=new Set(DB.reportes.map(r=>r.id));
+  localStorage.setItem(STORAGE_KEY,JSON.stringify(DB));
+}
+function cloudSync(){ if(!CLOUD.on) return; clearTimeout(CLOUD.syncTimer); CLOUD.syncTimer=setTimeout(doCloudSync,450); }
+async function syncTable(table,rows,key){
+  const cur=new Set(rows.map(r=>r.id));
+  const del=[...CLOUD.lastIds[key]].filter(id=>!cur.has(id));
+  if(del.length) await CLOUD.sb.from(table).delete().in("id",del);
+  if(rows.length) await CLOUD.sb.from(table).upsert(rows);
+  CLOUD.lastIds[key]=cur;
+}
+async function doCloudSync(){
+  if(!CLOUD.on) return; CLOUD.muteUntil=Date.now()+2500;
+  try{
+    await syncTable("areas",DB.areas.map(aOut),"areas");
+    await syncTable("kpis",DB.kpis.map(kOut),"kpis");
+    await syncTable("tareas",DB.tareas.map(tOut),"tareas");
+    await syncTable("reportes",DB.reportes.map(rOut),"reportes");
+    if(DB.ventas) await CLOUD.sb.from("ventas").upsert(veOut(DB.ventas));
+    setCloudBadge("Guardado en la nube ✓");
+  }catch(e){ console.warn("cloudSync",e); setCloudBadge("⚠ error al guardar"); }
+}
+function cloudSubscribe(){
+  ["tareas","kpis","reportes","ventas"].forEach(tbl=>{
+    CLOUD.sb.channel("rt-"+tbl).on("postgres_changes",{event:"*",schema:"public",table:tbl},()=>{
+      if(Date.now()<CLOUD.muteUntil) return;
+      clearTimeout(CLOUD.rtTimer);
+      CLOUD.rtTimer=setTimeout(async()=>{ try{ await cloudLoad(); render(); setCloudBadge("Actualizado 🔄"); }catch(e){} },600);
+    }).subscribe();
+  });
+}
+function setCloudBadge(txt){ const el=document.getElementById("cloudBadge"); if(el) el.textContent=txt; }
+function updateSideFoot(){
+  const f=document.querySelector(".side-foot");
+  if(!f) return;
+  if(CLOUD.on && CLOUD.user){
+    f.innerHTML='Masapan PM · <b>v2.0</b> · <span style="color:#7ee0a2">● nube</span><br>'+
+      '<span id="cloudBadge">Conectado</span> · '+CLOUD.user.email+' · <a href="#" id="logoutLink" style="color:#cbd0d8;text-decoration:underline">salir</a>';
+    const lo=document.getElementById("logoutLink"); if(lo) lo.onclick=async e=>{ e.preventDefault(); await CLOUD.sb.auth.signOut(); location.reload(); };
+  }
+}
+/* login */
+function showLogin(){ document.getElementById("loginOverlay").classList.add("open"); }
+function hideLogin(){ document.getElementById("loginOverlay").classList.remove("open"); }
+async function onLoggedIn(session){
+  CLOUD.user=session.user; CLOUD.on=true; hideLogin();
+  try{ await cloudLoad(); }catch(e){ console.warn("cloudLoad",e); alert("Conecté pero no pude leer los datos: "+e.message); }
+  cloudSubscribe(); updateSideFoot(); render(); setCloudBadge("Conectado ✓");
+}
+async function boot(){
+  render(); // pinta la app (con datos locales) de fondo
+  if(!window.supabase){ return; } // sin internet/librería → modo local
+  try{
+    CLOUD.sb=window.supabase.createClient(CLOUD.url,CLOUD.key);
+    const {data}=await CLOUD.sb.auth.getSession();
+    if(data && data.session){ await onLoggedIn(data.session); }
+    else { showLogin(); }
+  }catch(e){ console.warn("boot",e); }
+}
+document.getElementById("loginBtn").onclick=async()=>{
+  const email=document.getElementById("lg_email").value.trim(), password=document.getElementById("lg_pass").value;
+  document.getElementById("lg_msg").textContent="";
+  if(!email||!password){ document.getElementById("lg_msg").textContent="Completá email y contraseña."; return; }
+  const {data,error}=await CLOUD.sb.auth.signInWithPassword({email,password});
+  if(error){ document.getElementById("lg_msg").textContent="No pude entrar: "+error.message; return; }
+  onLoggedIn(data.session);
+};
+document.getElementById("signupBtn").onclick=async()=>{
+  const email=document.getElementById("lg_email").value.trim(), password=document.getElementById("lg_pass").value;
+  document.getElementById("lg_msg").textContent="";
+  if(!email||password.length<6){ document.getElementById("lg_msg").textContent="Email válido y contraseña de 6+ caracteres."; return; }
+  const {data,error}=await CLOUD.sb.auth.signUp({email,password});
+  if(error){ document.getElementById("lg_msg").textContent="Error: "+error.message; return; }
+  if(data.session){ onLoggedIn(data.session); }
+  else { document.getElementById("lg_msg").style.color="var(--ok)"; document.getElementById("lg_msg").textContent="Cuenta creada. Si pide confirmar por email, confirmá y después entrá."; }
+};
+document.getElementById("lg_offline").onclick=e=>{ e.preventDefault(); hideLogin(); };
+
 /* ---------- go ---------- */
-render();
+boot();
 </script>
 </body>
 </html>
